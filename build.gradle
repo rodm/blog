@@ -33,6 +33,7 @@ githubPages {
     targetBranch = 'master'
     pages {
         from (file('build/jbake')) {
+            exclude '**/*-draft.html'
             into '.'
         }
     }
