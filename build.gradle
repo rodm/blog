@@ -19,6 +19,10 @@ apply plugin: 'base'
 apply plugin: 'me.champeau.jbake'
 apply plugin: 'org.ajoberstar.github-pages'
 
+ext {
+    message = findProperty('message') ?: 'Publish of Github pages from Gradle.'
+}
+
 jbake {
     version = '2.3.2'
 
@@ -31,6 +35,7 @@ jbake {
 githubPages {
     repoUri = 'git@github.com:rodm/rodm.github.io.git'
     targetBranch = 'master'
+    commitMessage = message
     pages {
         from (file('build/jbake')) {
             exclude '**/*-draft.html'
