@@ -1,0 +1,191 @@
+= TeamCity Plugin Development with Gradle
+Rod MacKenzie
+2016-10-28
+:jbake-type: post
+:jbake-status: published
+:jbake-tags: gradle, teamcity, plugin
+:toc: macro
+:toc-title:
+:idprefix:
+:uri-teamcity-documentation: https://confluence.jetbrains.com/display/TCD10
+:uri-teamcity-plugin-development: {uri-teamcity-documentation}/Getting+Started+with+Plugin+Development
+:uri-gradle: https://gradle.org
+:uri-gradle-download: {uri-gradle}/gradle-download
+:uri-gradle-install: https://docs.gradle.org/current/userguide/installation.html
+:uri-gradle-plugin-portal: https://plugins.gradle.org/plugin/com.github.rodm.teamcity-server
+:uri-java-download: http://www.oracle.com/technetwork/java/javase/downloads/index.html
+
+This post follows the steps in {uri-teamcity-plugin-development}[Getting Started with Plugin Development]
+but uses {uri-gradle}[Gradle] as the build tool with the {uri-gradle-plugin-portal}[Gradle TeamCity plugin].
+
+toc::[]
+
+== Step 1 - Set up the environment
+
+To develop a plugin for TeamCity, first set up a plugin development environment.
+
+. Download and install {uri-java-download}[Oracle Java]. Java 1.8 is required for TeamCity 10.
+. Download and install a Java IDE that has Gradle integration
+. Download and install {uri-gradle-download}[Gradle]. Follow the {uri-gradle-install}[Gradle installation instructions].
+
+A TeamCity installation is not needed at this point and will be downloaded and installed later using a task provided
+by the {uri-gradle-plugin-portal}[Gradle TeamCity plugin].
+
+== Step 2 - Generate a Gradle project
+
+Unlike Maven, Gradle doesn't have archetype support so the initial project structure will be created using Gradle's
+init task and the plugin files will be manually created.
+
+Create a directory called demoPlugin, change into the directory and execute the following command to create
+a Gradle project
+----
+$GRADLE_HOME/bin/gradle init
+----
+
+Note: On Windows use the `gradle.bat` command
+
+=== View the project structure
+
+After the command finishes the directory contains the following files:
+
+* the `build.gradle` file containing a commented-out sample Java project
+* the `settings.gradle` file
+* the `gradlew` file to run Gradle on Linux and OS X
+* the `gradlew.bat` file to run Gradle on Windows
+* the `gradle` directory contains the Gradle wrapper used to run Gradle
+
+Open the project in an IDE
+
+Edit the `build.gradle` file and replace the contents with the following
+
+[source,groovy]
+[subs="attributes"]
+----
+plugins {
+  id 'java'
+  id 'com.github.rodm.teamcity-server' version '0.9.1'
+}
+
+group = 'com.demoDomain.teamcity.demoPlugin'
+version = '1.0-SNAPSHOT'
+
+teamcity {
+    version = '10.0'
+}
+----
+
+The contents of the `settings.gradle` file should set the project name as shown
+
+[source,groovy]
+[subs="attributes"]
+----
+rootProject.name = 'demoPlugin'
+----
+
+== Step 3 - Edit the plugin descriptor
+
+The Gradle plugin supports defining the plugin descriptor in a separate file or in the build file. For this example
+the descriptor will be defined in the `build.gradle` file. Add the following 'server' configuration block containing
+the plugin descriptor to the build file.
+
+[source,groovy]
+[subs="attributes"]
+----
+teamcity {
+    version = '10.0'
+
+    server {
+        descriptor {
+            name = project.name
+            displayName = 'Demo Plugin'
+            version = project.version
+            vendorName = 'Demo Vendor'
+            description = 'Demo plugin description'
+            useSeparateClassloader = false
+        }
+    }
+}
+----
+
+Using the inline descriptor allows the descriptor to use property values generated during the build such as a
+version number or a build timestamp.
+
+== Step 4 - Create the plugin sources
+
+Create the following directories for the Java source and plugin resources
+
+* `src/main/java`
+* `src/main/resources/META-INF`
+* `src/main/resources/buildServerResources`
+
+=== A. Create the plugin web-resources
+
+In the `buildServerResources` directory create the `Hello.jsp` file. Enter the contents as shown in the
+{uri-teamcity-plugin-development}#GettingStartedwithPluginDevelopment-A.Createthepluginweb-resources[TeamCity documentation]
+
+=== B. Create the controller and obtain the path to the JSP
+
+In the `src/main/java` directory create the sub-directories `com/demoDomain/teamcity/demoPlugin` then create the
+`AppServer.java` file. Enter the contents as shown in the
+{uri-teamcity-plugin-development}#GettingStartedwithPluginDevelopment-B.CreatethecontrollerandobtainthepathtotheJSP[TeamCity documentation]
+
+=== C. Update the Spring bean definition
+
+In the `src/main/resources/META-INF` directory create the file `build-server-plugin-demo-plugin.xml` and enter the
+contents as shown in the
+{uri-teamcity-plugin-development}#GettingStartedwithPluginDevelopment-C.UpdatetheSpringbeandefinition[TeamCity documentation]
+
+== Step 5 - Build the plugin with Gradle
+
+At the root of the project execute the following command
+----
+./gradlew build
+----
+
+The `build/distributions` directory will contain the `demoPlugin-1.0-SNAPSHOT.zip` file.
+
+== Step 6 - Install the plugin to TeamCity
+
+To install and start a TeamCity instance edit the `build.gradle` file adding an 'environments' configuration block
+as shown.
+
+[source,groovy]
+[subs="attributes"]
+----
+teamcity {
+    server {
+        descriptor {
+            ...
+        }
+
+        environments {
+            teamcity10 {
+                version = '10.0.2'
+            }
+        }
+    }
+}
+----
+
+Run `./gradlew tasks` to see the new tasks available to download and install TeamCity, tasks to start and stop the
+server and agent, and tasks to deploy and undeploy the plugin.
+
+To download and install TeamCity for the environment, execute the following command, note this will take some time.
+----
+./gradlew installTeamcity10
+----
+
+To deploy the plugin and start the server execute the following command
+----
+./gradlew startTeamcity10Server
+----
+
+The first time the TeamCity Server is started a database connection must be selected, the license agreement
+accepted and an administrator account setup. Select 'Internal HSQLDB' for the database type.
+
+The TeamCity Demo Plugin should appear in http://localhost:8111/admin/admin.html?item=plugins[Administration|Plugins List].
+
+The Hello World page is available via http://localhost:8111/demoPlugin.html.
+
+Completed examples of the build files can be downloaded from the following links link:build.gradle[build.gradle] and
+link:settings.gradle[settings.gradle]

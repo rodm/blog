@@ -1,0 +1,29 @@
+
+plugins {
+    id 'java'
+    id 'com.github.rodm.teamcity-server' version '0.9.1'
+}
+
+group = 'com.demoDomain.teamcity.demoPlugin'
+version = '1.0-SNAPSHOT'
+
+teamcity {
+    version = '10.0'
+
+    server {
+        descriptor {
+            name = project.name
+            displayName = 'Demo Plugin'
+            version = project.version
+            vendorName = 'Demo Vendor'
+            description = 'Demo plugin description'
+            useSeparateClassloader = false
+        }
+
+        environments {
+            teamcity10 {
+                version = '10.0.2'
+            }
+        }
+    }
+}
