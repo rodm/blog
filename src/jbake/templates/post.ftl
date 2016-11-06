@@ -8,6 +8,10 @@
 
 	<p><em>${content.date?string("dd MMMM yyyy")}</em></p>
 
+    <p>Tags: <#list content.tags as tag>
+        <a href="/tags/${tag?trim?replace(' ','-')}.html">${tag}</a>
+    </#list></p>
+
 	<p>${content.body}</p>
 
     <#include "disqus.ftl">
