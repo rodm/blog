@@ -1,17 +1,15 @@
 
 buildscript {
     repositories {
+        mavenLocal()
         maven {
             url "https://plugins.gradle.org/m2/"
         }
     }
 
     dependencies {
-        classpath 'me.champeau.gradle:jbake-gradle-plugin:0.2'
+        classpath 'me.champeau.gradle:jbake-gradle-plugin:0.3.0-SNAPSHOT'
         classpath 'org.ajoberstar:gradle-git:1.5.1'
-        classpath 'org.asciidoctor:asciidoctor-java-integration:0.1.4'
-        classpath 'org.pegdown:pegdown:1.4.2'
-        classpath 'org.freemarker:freemarker:2.3.19'
     }
 }
 
@@ -24,10 +22,10 @@ ext {
 }
 
 jbake {
-    version = '2.3.2'
+    version = '2.5.0'
 
-    input = file('src/jbake')
-    output = file('build/jbake')
+    srcDirName = 'src/jbake'
+    destDirName = 'jbake'
 
     clearCache = true
 }
