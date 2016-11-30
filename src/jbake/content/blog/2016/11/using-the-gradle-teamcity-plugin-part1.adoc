@@ -1,0 +1,289 @@
+= Using the Gradle TeamCity plugin - Part 1
+Rod MacKenzie
+2016-11-30
+:jbake-type: post
+:jbake-status: published
+:jbake-tags: gradle, teamcity, build, plugin
+:idprefix:
+:uri-gradle-plugin-portal: https://plugins.gradle.org/plugin/com.github.rodm.teamcity-server
+:uri-gradle-plugin-source: https://github.com/rodm/gradle-teamcity-plugin
+:uri-agent-tool-build-file: {uri-gradle-plugin-source}/blob/master/samples/agent-tool-plugin/build.gradle
+:uri-previous-post: https://rodm.github.io/blog/2016/10/teamcity-plugin-development-with-gradle.html
+:uri-server-plugin-descriptor: https://github.com/rodm/gradle-teamcity-plugin#examples
+:uri-agent-plugin-descriptor: https://github.com/rodm/gradle-teamcity-plugin#examples-1
+:uri-gradle-copyspec: https://docs.gradle.org/current/javadoc/org/gradle/api/file/CopySpec.html
+
+The {uri-previous-post}[previous post] provided a very brief introduction to using the
+{uri-gradle-plugin-portal}[Gradle TeamCity plugin].
+This is the first post of two on using the plugin and will expand on the plugin's configuration properties and tasks,
+introduce agent-side plugin and tools support and a few tips on using the plugin. The second post will cover how to
+setup multiple TeamCity environments to test and debug a plugin.
+
+The Gradle TeamCity plugin actually consists of 3 plugins and typically each is applied to a separate Gradle project
+in a multi-project setup to build and package the corresponding component of a TeamCity plugin.
+
+The server-side plugin, `com.github.rodm.teamcity-server` adds tasks and dependencies to a Gradle project to build a
+server-side plugin archive. This plugin is required to produced the final plugin archive to be deployed to a TeamCity server.
+
+The agent-side plugin, `com.github.rodm.teamcity-agent` adds tasks and dependencies to a Gradle project to build an
+agent-side plugin archive.
+
+The third plugin is the common plugin, `com.github.rodm.teamcity-common`, this plugin only adds a dependency to a
+Gradle project to support creating a shared library for use by both the agent-side and server-side components.
+
+We can configure the version of the API to be used by the plugins by setting the `version` property in the `teamcity`
+configuration. By default it's set to '9.0', it can be set to any release or snapshot version of TeamCity but I
+would recommend setting the version using only the major and minor numbers.
+
+[source,groovy]
+[subs="attributes"]
+----
+teamcity {
+    version = '9.1'
+}
+----
+
+We can support changing the version at build time by using a Gradle property. Using a Gradle property to change the
+API version to build against makes it easy to discover any incompatible API changes.
+
+[source,groovy]
+[subs="attributes"]
+----
+ext {
+    teamcityVersion = findProperty('teamcity.version') ?: '9.1'
+}
+----
+
+With the above configuration, building the plugin against a newer version of the API can be run by providing an
+override to the `teamcity.version` property at the command line.
+
+    $ ./gradlew -Pteamcity.version=10.0 clean build
+
+== Common plugin
+
+The first plugin of the three is the common plugin. This plugin only adds the `common-api` dependency to a Gradle
+project. The output of the project, a jar file, can then be packaged with both the agent-side and server-side plugins.
+
+[source,groovy]
+[subs="attributes"]
+----
+apply plugin: 'java'
+apply plugin: 'com.github.rodm.teamcity-common'
+
+teamcity {
+    version = teamcityVersion
+}
+----
+
+The example above shows the `version` property being set with the value of the extension property `teamcityVersion`,
+this expects the extension property value to be inherited from the root project.
+
+By default the jar file will contain the project version as part of its name. For a jar file that will be packaged
+into a plugin archive file it may not be necessary to keep the version, we can remove the version from the jar name
+by setting the version property of the `jar` task to an empty string.
+
+[source,groovy]
+[subs="attributes"]
+----
+jar {
+    version = ''
+}
+----
+
+== Agent plugin
+
+The next plugin is the agent-side plugin, it adds the dependency `agent-api` to a project and the following
+tasks:-
+
+* `generateAgentDescriptor`
+* `processAgentDescriptor`
+* `agentPlugin`
+
+The `generateAgentDescriptor` task will use the descriptor defined in the Gradle build file and generate an agent-side
+plugin descriptor file in the build directory. The task is disabled if the descriptor is defined to use an external
+file.
+
+The `processAgentDescriptor` task will use the descriptor file defined in the Gradle build file. It will copy the
+descriptor file to the build directory and replace any token in the file with the value defined in the build file.
+
+The `agentPlugin` task packages the agent-side jar, any third-party libraries and plugin descriptor into an agent-side
+plugin archive, a zip file. The agent-side plugin archive is added to the `plugin` configuration so that it can be
+used as a dependency by a project building the server-side plugin.
+
+In addition to adding the above tasks the plugin extends the `jar` task to output warnings if the Spring Bean
+descriptor file references any classes that are not included in the agent-side jar file.
+
+The example below shows the minimum configuration required to create an agent-side plugin descriptor. More descriptor
+properties supported by the plugin can be found in the {uri-agent-plugin-descriptor}[examples] of the README file.
+
+[source,groovy]
+[subs="attributes"]
+----
+teamcity {
+    agent {
+        descriptor {
+            pluginDeployment {
+                useSeparateClassloader = true
+            }
+        }
+    }
+}
+----
+
+We can include a shared jar built against the `common-api` from another Gradle project by adding it as a dependency.
+
+[source,groovy]
+[subs="attributes"]
+----
+dependencies {
+    compile project(':common')
+}
+----
+
+By default the agent-side plugin archive name is a based on the name of the root Gradle project with '-agent' and
+the project version appended. We can change this by setting the `baseName` and `version` properties of the `agentPlugin`
+task.
+
+[source,groovy]
+[subs="attributes"]
+----
+agentPlugin {
+    baseName = 'pluginName'
+    version = ''
+}
+----
+
+We can include additional jars, native libraries and scripts in the plugin archive. The files to be included can be
+defined in one or more `files` {uri-gradle-copyspec}[CopySpec] configuration blocks.
+
+[source,groovy]
+[subs="attributes"]
+----
+teamcity {
+    agent {
+        files {
+            into('lib') {
+                from('path/to/additional/jars')
+            }
+        }
+        files {
+            into('bin') {
+                from('path/to/scripts')
+            }
+        }
+    }
+}
+----
+
+=== A Tool plugin
+
+The agent-side plugin can also produce a tool plugin. A tool plugin can be used to repackage an existing tool for
+deployment to TeamCity. The tool is made available to build configurations as a parameter, the parameter is the path
+to where the tool is installed on each build agent.
+
+A minimal Gradle project to build a tool plugin can apply the agent-side and server-side plugins and use Gradle's
+dependency management to download the tool to be repackaged.
+
+The samples directory for the {uri-gradle-plugin-source}[Gradle TeamCity plugin] contains an example project,
+agent-tool-plugin, that shows Apache Maven 3.3.3 being repackaged as a tool. The {uri-agent-tool-build-file}[build file]
+shows how the Maven archive is downloaded as a dependency, added to the plugin archive using the `files`
+{uri-gradle-copyspec}[CopySpec] and how the `mvn` shell script is set to be executable.
+
+Creating tool plugins is useful for deploying tools to all TeamCity build agents that are not available using
+the native package manager on the build agent host.
+
+== Server plugin
+
+The final plugin is the server-side plugin, it adds the dependency `server-api` to the project and the following
+tasks:-
+
+* `generateServerDescriptor`
+* `processServerDescriptor`
+* `serverPlugin`
+
+The `generateServerDescriptor` task will use the descriptor defined in the Gradle build file and generate an server-side
+plugin descriptor file in the build directory. The task is disabled if the descriptor is defined to use an external
+file.
+
+The `processServerDescriptor` task will use the descriptor file defined in the Gradle build file. It will copy the
+descriptor file to the build directory and replace any token in the file with the value defined in the build file.
+An example is shown at the end of this post.
+
+The `serverPlugin` task packages the server-side jar, any third-party libraries, the agent-side plugin archive and
+plugin descriptor into a server-side plugin archive, a zip file.
+
+A complete set of the descriptor properties supported by the server-side plugin can be found in the
+{uri-server-plugin-descriptor}[examples] of the README file.
+
+The server-side plugin, like the agent-side plugin, extends the `jar` to output warnings if the Spring Bean descriptor
+file references classes that are not included in the server-side jar file.
+
+To include a jar from another project that has been built against the `common-api` the same configuration
+shown above for the agent-side plugin can be used.
+
+To include the agent-side plugin archive, the output from a project building the agent-side plugin, can be added to
+the `agent` configuration as shown below.
+
+[source,groovy]
+[subs="attributes"]
+----
+dependencies {
+    agent project(path: ':agent', configuration: 'plugin')
+}
+----
+
+The server-side plugin like the agent-side plugin can include additional files, jars or native libs, and scripts in
+the archive using the `files` {uri-gradle-copyspec}[CopySpec] property. The example shown for the agent-side is the
+same for the server-side.
+
+The default name for the plugin archive is the name of the root Gradle project, this is typically defined in the
+settings.gradle file, and the version property. We can change the name and remove the version from the archive name
+by setting the following properties on the `serverPlugin` task.
+
+[source,groovy]
+[subs="attributes"]
+----
+serverPlugin {
+    baseName = 'pluginName'
+    version = ''
+}
+----
+
+Tokens to be replaced in the plugin descriptor XML file should follow Ant's style for tokens, this means they
+should start and end with the '@' character.
+
+[source,xml]
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<teamcity-plugin xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                 xsi:noNamespaceSchemaLocation="urn:schemas-jetbrains-com:teamcity-plugin-v1-xml">
+    <info>
+        <name>server-plugin</name>
+        <display-name>server-plugin</display-name>
+        <version>@VERSION@</version>
+        <description>TeamCity Example Server Plugin</description>
+        <vendor>
+            <name>@VENDOR_NAME@</name>
+        </vendor>
+    </info>
+    <deployment use-separate-classloader="true"/>
+</teamcity-plugin>
+----
+
+To replace the tokens in the above file the server-side plugin can be configured, as shown below, to provide a map
+of the tokens and values.
+
+[source,groovy]
+[subs="attributes"]
+----
+teamcity {
+    server {
+        descriptor = file("${rootDir}/teamcity-plugin.xml")
+        tokens VERSION: project.version, VENDOR_NAME: 'vendor'
+    }
+}
+----
+
+This post has hopefully provided more detail and some tips on building TeamCity plugins using the
+{uri-gradle-plugin-portal}[Gradle TeamCity plugin]. The next post will show how to use the plugin to test and
+debug a TeamCity plugin.
