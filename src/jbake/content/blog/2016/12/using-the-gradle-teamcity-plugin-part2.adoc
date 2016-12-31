@@ -1,0 +1,376 @@
+= Using the Gradle TeamCity plugin - Part 2
+Rod MacKenzie
+2016-12-30
+:jbake-type: post
+:jbake-status: published
+:jbake-tags: gradle, teamcity, build, plugin
+:idprefix:
+:uri-gradle-plugin-portal: https://plugins.gradle.org/plugin/com.github.rodm.teamcity-server
+:uri-previous-post: https://rodm.github.io/blog/2016/10/teamcity-plugin-development-with-gradle.html
+:uri-server-plugin-descriptor: https://github.com/rodm/gradle-teamcity-plugin#examples
+:uri-agent-plugin-descriptor: https://github.com/rodm/gradle-teamcity-plugin#examples-1
+:uri-sample-plugin: https://github.com/rodm/gradle-teamcity-plugin/tree/master/samples/agent-server-plugin
+:uri-teamcity-plugins-list: http://localhost:8111/admin/admin.html?item=plugins
+:uri-teamcity-agents-list: http://localhost:8111/agents.html
+:uri-teamcity-example-page: http://localhost:8111/example.html
+:uri-teamcity-development-env: https://confluence.jetbrains.com/display/TCD10/Development+Environment
+:uri-teamcity-data-dir: https://confluence.jetbrains.com/display/TCD10/TeamCity+Data+Directory
+:uri-idea-gradle-tool: https://www.jetbrains.com/help/idea/2016.3/gradle-tool-window.html
+
+This post is the second of two on using the {uri-gradle-plugin-portal}[Gradle TeamCity plugin] and will cover
+how to setup multiple TeamCity environments to test and debug a plugin.
+
+First we will look at configuring environments, all the properties and tasks that are available and some tips
+on setting up a project to develop a TeamCity plugin.
+
+== Environments
+
+Environments are configured in the `environments` configuration block under the `teamcity` configuration.
+The environments configuration allows one or more TeamCity installations to be defined so that
+the plugin being developed can be deployed and tested.
+
+=== Environment properties
+
+An environment is given a name and each environment has the properties shown in the following example:
+
+----
+teamcity {
+    environments {
+        name {
+            version = '9.0'
+            downloadUrl = `${baseDownloadUrl}/TeamCity-${version}.tar.gz`
+            homeDir = `${baseHomeDir}/TeamCity-${version}`
+            dataDir = `${baseDataDir}/${version}`
+            javaHome = file('/path/to/java')
+            serverOptions = '-Dteamcity.development.mode=true -Dteamcity.development.shadowCopyClasses=true'
+            agentOptions = ''
+        }
+    }
+}
+----
+
+The `version` property is the released version of TeamCity that is used by the environment. The property is used
+as part of the URL to download TeamCity and as part of the directory where TeamCity is installed.
+
+The `downloadUrl` property is the URL of a TeamCity release that is downloaded. The default is to download the
+release archives from the JetBrains download site.
+
+The `homeDir` property is the path to the TeamCity installation.
+
+The `dataDir` property is the path to the {uri-teamcity-data-dir}[TeamCity Data Directory] where the TeamCity
+configuration is stored.
+
+The `javaHome` property is the path to the version of Java to use to run the TeamCity Server and Build Agent. If the
+property is not set the version of Java running Gradle is used.
+
+The `serverOptions` property is a collection of options that are passed to the TeamCity Server at startup.
+
+The `agentOptions` property is a collection of options that are passed to the TeamCity Build Agent at startup.
+
+The example above shows all the properties with their default values, so the minimum required to create an environment
+is a name, and in that case it would use TeamCity version 9.0. The minimum required for an environment using a
+different version is to set the `version` and possibly the `javaHome` properties.
+
+.Example environment using TeamCity 10.0.4 and Java 8
+----
+teamcity {
+    environments {
+        teamcity10 {
+            version = '10.0.4'
+            javaHome = file('/path/to/java8')
+        }
+    }
+}
+----
+
+=== Shared environment properties
+
+The `downloadUrl`, `homeDir` and `dataDir` properties for all environments are based on shared environment properties
+to allow installations and data directories to share a common parent directory. The shared properties and their
+default values are shown in the following example.
+
+----
+teamcity {
+    environments {
+        downloadsDir = 'downloads'
+        baseDownloadUrl = 'http://download.jetbrains.com/teamcity'
+        baseDataDir = 'data'
+        baseHomeDir = 'servers'
+    }
+}
+----
+
+The `downloadsDir` property is the directory used to store the downloaded TeamCity archives. By default this
+directory is under the project, but I would recommend changing this to store the files in another directory.
+
+The `baseDownloadUrl` property is used to create the URL to download the TeamCity archive. The default is to use the
+JetBrains download site, but it can be changed to use an alternative server, possibly a local enterprise server that
+mirrors the JetBrains site.
+
+The `baseHomeDir` property is the directory that the TeamCity release for each environment is installed. Instead of
+the archive being unpacked to a 'TeamCity' directory the version is appended as shown earlier. I recommend changing
+this to use a directory that can be shared by multiple projects.
+
+The `baseDataDir` property is the base directory used to store all the TeamCity configuration files for each
+environment. Each environment's configuration files are stored in a sub-directory based on the TeamCity version, but
+only the major and minor version numbers are used. I recommend keeping this directory within the project, any build
+configurations will most likely be setup to test the TeamCity plugin and possibly not useful elsewhere.
+
+=== Environment tasks
+
+A set of tasks are created for each environment. These tasks support downloading and installing a TeamCity Server,
+starting and stopping both the server and build agent. There are also tasks to deploy and undeploy the plugin to
+each environment.
+
+The following lists the task name and description:-
+
+* download__Name__ - downloads the TeamCity archive
+* install__Name__ - unpacks and installs TeamCity
+* deployPluginTo__Name__ - deploy plugin to an environment
+* undeployPluginFrom__Name__ -  the plugin from an environment
+* start__Name__Server - starts the server for an environment
+* stop__Name__Server - stops the server for an environment
+* start__Name__Agent - starts the default agent for an environment
+* stop__Name__Agent - stops the default agent for an environment
+
+The tasks for each environment are grouped by Gradle under 'TeamCity tasks'. The following image shows the tasks for
+the 'teamcity10' environment in IntelliJ IDEA's {uri-idea-gradle-tool}[Gradle Tool window].
+
+image::/blog/2016/12/gradle-teamcity-tasks.png[IDEA Gradle TeamCity Tasks, align="center"]
+
+=== Examples
+
+The following example shows configuring shared environment properties using Gradle extension properties. The extension
+properties are themselves configured using Gradle properties. Gradle properties can be defined in a `gradle.properties`
+file in the project root or in the `.gradle` directory of the user's home directory. Additionally Gradle properties
+can be set from the command line using the -P option.
+
+The example below shows that the directory to download and store the TeamCity release archives can be overridden with
+the Gradle `downloads.dir` property that is then used to set the shared environments property `downloadsDir`. Likewise
+the `servers.dir` property is used to set `baseHomeDir` environments property.
+
+----
+ext {
+    downloadsDir = project.findProperty('downloads.dir') ?: "$rootDir/downloads"
+    serversDir = project.findProperty('servers.dir') ?: "$rootDir/servers"
+    java7Home = project.findProperty('java7.home') ?: '/opt/jdk1.7.0_80'
+    java8Home = project.findProperty('java8.home') ?: '/opt/jdk1.8.0_92'
+}
+
+teamcity {
+    ...
+
+    environments {
+        downloadsDir = project.downloadsDir
+        baseHomeDir = project.serversDir
+        baseDataDir = 'data'
+
+        teamcity9 {
+            version = '9.1.7'
+            javaHome = file(java7Home)
+        }
+
+        teamcity10 {
+            version = '10.0.4'
+            javaHome = file(java8Home)
+        }
+    }
+}
+----
+
+This next example shows using a Groovy closure to create a string with the Java debug options with a different port
+for each Java process.
+
+[source,groovy]
+[subs="attributes"]
+----
+def debugOptions = { port -> "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=${port}" }
+
+teamcity {
+    environments {
+        teamcity9 {
+            version = '9.1.7'
+            javaHome = file(java7Home)
+            serverOptions debugOptions(5005)
+            agentOptions debugOptions(5006)
+        }
+    }
+}
+----
+
+== Using environment tasks
+
+In this next section we use the tasks available in each environment to deploy the plugin, start and stop both the
+TeamCity Server and Build Agent.
+
+=== Deploying the plugin
+
+The following steps use the {uri-sample-plugin}[agent-server-plugin] from the samples directory. The plugin is a simple
+example of a Build Feature plugin that has both agent-side and server-side components.
+
+If the TeamCity Server for the environment is not already installed the following task can be executed to download and
+install the TeamCity Server. This task can take several minutes to complete.
+
+    $ ./gradlew installTeamcity10
+
+We can now start the TeamCity Server by executing the following task.
+
+    $ ./gradlew startTeamcity10Server
+
+The output from the task shows that starting the server will also deploy the plugin.
+
+----
+:build UP-TO-DATE
+:deployPluginToTeamcity10
+:startTeamcity10Server
+
+BUILD SUCCESSFUL
+----
+
+The first time the server is started some setup is required, accepting the license, selecting the database and
+creating an administration user.
+
+To see the deployed plugin navigate to the {uri-teamcity-plugins-list}[Plugins List] in the TeamCity Administration
+page. The external plugins should show the plugin as shown in the following image
+
+image::/blog/2016/12/teamcity-plugins-list.png[TeamCity Plugins List, align="center"]
+
+The plugin can be deployed or re-deployed with or with-out the server running by executing the deploy task, as shown.
+
+    $ ./gradlew deployPluginToTeamcity10
+
+Finally to start the TeamCity Build Agent the following task can be run.
+
+    $ ./gradlew startTeamcity10Agent
+
+After the TeamCity Build Agent has finished its startup procedures it will appear in the
+{uri-teamcity-agents-list}[Agents] list.
+
+=== Making a change to a web resource and re-deploying the plugin
+
+We can make a change to a web resource file, for example changing the file
+`src/main/resources/buildServerResources/example.jsp` and then re-deploy the plugin without re-starting the server.
+
+    $ ./gradlew deployPluginToTeamcity10
+
+----
+...
+:check UP-TO-DATE
+:build
+:deployPluginToTeamcity10
+
+BUILD SUCCESSFUL
+
+Total time: 7.467 secs
+----
+
+Refreshing the {uri-teamcity-example-page}[example page] should show the change.
+
+It takes quite a few seconds for Gradle to configure and execute the tasks required to re-package and
+re-deploy the plugin. Gradle supports a continuous option that keeps Gradle running and monitoring the project
+for any changes. We can run the deploy task with the continuous option.
+
+    $ ./gradlew --continuous deployPluginToTeamcity10
+
+----
+Continuous build is an incubating feature.
+...
+:build UP-TO-DATE
+:deployPluginToTeamcity10 UP-TO-DATE
+
+BUILD SUCCESSFUL
+
+Total time: 6.836 secs
+
+Waiting for changes to input files of tasks... (ctrl-d to exit)
+----
+
+Running the task with the continuous option takes about the same amount of time as the previous deploy but when the
+resource file is changed again, as shown below, it is much quicker to re-deploy.
+
+----
+Waiting for changes to input files of tasks... (ctrl-d to exit)
+modified: .../agent-server-plugin/src/main/resources/buildServerResources/example.jsp
+Change detected, executing build...
+
+...
+:check UP-TO-DATE
+:build
+:deployPluginToTeamcity10
+
+BUILD SUCCESSFUL
+
+Total time: 1.648 secs
+
+Waiting for changes to input files of tasks... (ctrl-d to exit)
+----
+
+To run the build continuously from within IDEA requires editing a Run/Debug Configuration and providing the
+'--continuous' option to a configuration the executes a 'deploy' task, as shown in the following image:
+
+image::/blog/2016/12/gradle-run-settings.png[IDEA Gradle Run Configuration, align="center"]
+
+=== Making a change to a class
+
+We can make a change to a class but there are some restrictions. The TeamCity documentation,
+{uri-teamcity-development-env}[Development Environment], covers what can and can't be done when changing a class.
+To summarise, using a debug connection, only method bodies can be changed and updated using the JVM's HotSwap feature.
+
+== Debugging the plugin
+
+In this section we will go through the steps to setup both the TeamCity Server and Build Agent in debug mode
+and connect a remote debugger to them using IntelliJ IDEA.
+
+To debug the TeamCity Server and Build Agent requires enabling the debug options for each Java process. The following
+example shows and environment with debug options for both the server and agent. Note each uses a different port, this
+is required if both are to be debugged at the same time.
+
+[source,groovy]
+[subs="attributes"]
+----
+teamcity {
+    environments {
+        teamcity10 {
+            version = '10.0.4'
+            javaHome = file(java8Home)
+            serverOptions '-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005'
+            agentOptions '-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5006'
+        }
+    }
+}
+----
+
+Create a Remote Run/Debug Configuration for both the server and the agent, as shown below, the port for each should
+match the configuration shown above.
+
+image::/blog/2016/12/remote-debug-settings.png[IDEA Remote Run/Debug Settings, align="center"]
+
+We should then have two Remote Debug configurations as shown below.
+
+image::/blog/2016/12/remote-debug-configuration.png[IDEA Remote Run/Debug Configurations, align="center"]
+
+Start both the server and agent using the Gradle tasks, 'startTeamcity10Server' and 'startTeamcity10Agent', either
+from the command line or using the Gradle Tool Window in IDEA.
+
+We will need a project and a build configuration to test debugging the plugin. Once the server is started create a
+project and then a build configuration. The build configuration doesn't require a VCS root or a build file,
+a command line build step using an inline script will do.
+
+Start the Remote debug connection for the server. Open the 'ExampleBuildFeature' class in the main project and
+set a breakpoint in the 'describeParameters' method. Using the TeamCity UI edit the build configuration and
+add the 'Example Build Feature', the remote debug connection should stop at the breakpoint in the plugin source.
+
+image::/blog/2016/12/breakpoint-server-side.png[Server-side plugin breakpoint, align="center"]
+
+The same can be done for agent-side plugin code, start the Remote debug connection for the agent. Open the
+'ExampleBuildFeature' class in the agent sub-project and set a breakpoint in the 'buildStarted' method.
+Run the build configuration, the remote debug connection for the agent should stop at the breakpoint in the
+agent-side plugin source.
+
+image::/blog/2016/12/breakpoint-agent-side.png[Agent-side plugin breakpoint, align="center"]
+
+Be aware that the Agent debug connection can become disconnected if the agent preforms an upgrade. This can happen
+if the agent-side code is changed and the plugin re-deployed.
+
+This post has hopefully provided some help on testing and debugging TeamCity plugins using the
+{uri-gradle-plugin-portal}[Gradle TeamCity plugin].
