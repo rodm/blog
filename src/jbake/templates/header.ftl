@@ -4,9 +4,9 @@
     <meta charset="utf-8"/>
     <title><#if (content.title)??><#escape x as x?xml>${content.title}</#escape><#else>Rod's blog</#if></title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="">
-    <meta name="author" content="">
-    <meta name="keywords" content="">
+    <meta name="description" content="Rod's blog">
+    <meta name="author" content="Rod MacKenzie">
+    <meta name="keywords" content="java, gradle, teamcity, development">
     <meta name="generator" content="JBake">
 
     <!-- Le styles -->
