@@ -33,6 +33,8 @@ the plugin being developed can be deployed and tested.
 
 An environment is given a name and each environment has the properties shown in the following example:
 
+[source,groovy]
+[subs="attributes"]
 ----
 teamcity {
     environments {
@@ -71,6 +73,8 @@ The example above shows all the properties with their default values, so the min
 is a name, and in that case it would use TeamCity version 9.0. The minimum required for an environment using a
 different version is to set the `version` and possibly the `javaHome` properties.
 
+[source,groovy]
+[subs="attributes"]
 .Example environment using TeamCity 10.0.4 and Java 8
 ----
 teamcity {
@@ -89,6 +93,8 @@ The `downloadUrl`, `homeDir` and `dataDir` properties for all environments are b
 to allow installations and data directories to share a common parent directory. The shared properties and their
 default values are shown in the following example.
 
+[source,groovy]
+[subs="attributes"]
 ----
 teamcity {
     environments {
@@ -149,6 +155,8 @@ The example below shows that the directory to download and store the TeamCity re
 the Gradle `downloads.dir` property that is then used to set the shared environments property `downloadsDir`. Likewise
 the `servers.dir` property is used to set `baseHomeDir` environments property.
 
+[source,groovy]
+[subs="attributes"]
 ----
 ext {
     downloadsDir = project.findProperty('downloads.dir') ?: "$rootDir/downloads"
