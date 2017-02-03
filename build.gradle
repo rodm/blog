@@ -22,7 +22,7 @@ ext {
 }
 
 jbake {
-    version = '2.5.0'
+    version = '2.5.1'
 
     srcDirName = 'src/jbake'
     destDirName = 'jbake'
