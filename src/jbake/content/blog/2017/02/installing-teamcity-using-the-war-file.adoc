@@ -1,0 +1,182 @@
+= Installing TeamCity using the war file
+Rod MacKenzie
+2017-02-28
+:jbake-type: post
+:jbake-status: published
+:jbake-tags: teamcity, installation, configuration
+:idprefix:
+:uri-teamcity-download: https://www.jetbrains.com/teamcity/download/index.html
+:uri-teamcity-documentation: https://confluence.jetbrains.com/display/TCD10
+:uri-teamcity-install: {uri-teamcity-documentation}/Installing+and+Configuring+the+TeamCity+Server#InstallingandConfiguringtheTeamCityServer-InstallingTeamCityintoExistingJ2EEContainer
+:uri-teamcity-mysql-config: {uri-teamcity-documentation}/Setting+up+an+External+Database#SettingupanExternalDatabase-MySQL
+:uri-tomcat-running: https://tomcat.apache.org/tomcat-7.0-doc/RUNNING.txt
+:uri-teamcity-server-setup: https://github.com/rodm/teamcity-vagrant/blob/409a7f071cb93c1d7f20f82b21b50716f7e97109/scripts/setup-server.sh
+:uri-teamcity-database-setup: {uri-teamcity-server-setup}#L44
+:uri-teamcity-agent-setup: https://github.com/rodm/teamcity-vagrant/blob/409a7f071cb93c1d7f20f82b21b50716f7e97109/scripts/setup-agent.sh
+:uri-teamcity-server-script: https://github.com/rodm/teamcity-vagrant/blob/409a7f071cb93c1d7f20f82b21b50716f7e97109/files/server/bin/server.sh
+:uri-teamcity-vagrant: https://github.com/rodm/teamcity-vagrant
+:uri-packer: https://www.packer.io/
+
+Most of this post was written a few years ago, like my previous post, but I never got around to finishing it. So after
+tidying up some parts and finishing others, here it is.
+
+== Introduction
+
+The recommended installer to use for setting up a TeamCity installation is to use the TeamCity distribution bundled
+with Tomcat. This post is about the setup of TeamCity using the war file that I've used since the first version of
+TeamCity. The setup allows the configuration and supporting scripts to be committed to a version control system and
+makes it easier to upgrade TeamCity, Tomcat and Java. The war file can be downloaded from the
+{uri-teamcity-download}[TeamCity download] page by selecting the JavaEE option.
+
+The instructions for installing using the war file are here
+{uri-teamcity-install}[Installing TeamCity into Existing J2EE Container],
+but I'm going to describe my approach that installs TeamCity on a Linux system.
+
+== Directory structure
+
+All the packages are installed into the `/opt` directory. Oracle's version of Java is used as OpenJDK is not officially
+supported by JetBrains but it may work, it is unpacked into the `/opt` directory. A directory for the TeamCity
+application war file, configuration files, and shell scripts is created, `/opt/teamcity-server`. Tomcat is unpacked
+into the `/opt` directory and the `conf` directory is copied to the `/opt/teamcity-server` directory. A teamcity user
+and group are created using the `useradd` and `groupadd` commands and the `teamcity-server` directory has the owner
+and group settings changed to use these ids.
+
+The `/opt` directory looks like the following:
+
+[source]
+----
+drwxr-xr-x  9 root     root     4096 May 19 22:34 apache-tomcat-7.0.54
+drwxr-xr-x  8 uucp          143 4096 Jun 17 04:27 jdk1.7.0_65
+drwxr-xr-x 10 teamcity teamcity 4096 Jan 28 18:08 teamcity-server
+----
+
+The contents of the directory, `/opt/teamcity-server`, after installing and adding scripts is as follows.
+
+[source]
+----
+drwxr-xr-x 2 teamcity teamcity      4096 Jan 28 18:04 bin
+drwxr-xr-x 3 teamcity teamcity      4096 Jan 28 18:04 conf
+drwxr-xr-x 6 teamcity teamcity      4096 Jan 28 18:08 data
+drwxr-xr-x 2 teamcity teamcity      4096 Jan 28 18:05 logs
+drwxrwxr-x 4 teamcity teamcity      4096 Jan 28 18:08 temp
+drwxrwxr-x 3 teamcity teamcity      4096 Jan 28 18:04 webapps
+drwxrwxr-x 3 teamcity teamcity      4096 Jan 28 18:05 work
+-rw-r--r-- 1 teamcity teamcity 434544596 Jan 28 18:04 TeamCity-8.0.6.war
+----
+
+The `bin` directory contains a script to start and stop TeamCity, `server.sh`. This script calls the `startup.sh` and
+`shutdown.sh` scripts in the Tomcat installation directory and sets a number of environment variables and Java
+properties to configure TeamCity and the JVM. The Tomcat environment variables `TOMCAT_HOME` and `TOMCAT_BASE` are
+set to the Tomcat install directory and the TeamCity directory, they are explained in the {uri-tomcat-running}[Tomcat]
+documentation. The `TEAMCITY_DATA_PATH` variable is used to set the TeamCity BuildServer directory. An example of
+the `server.sh` can be seen {uri-teamcity-server-script}[here].
+
+The data directory is the TeamCity `.BuildServer` directory that is normally created in the home directory of the user
+that TeamCity runs under. The default is overridden by the `server.sh` script to use the `data` directory in
+`/opt/teamcity-server`. Putting the TeamCity and Tomcat configuration along with the script to start and stop the server
+under the `/opt/teamcity-server` directory allows the configuration to be stored in a version control system. The
+following directories are excluded from version control `logs`, `temp`, `webapp` and `work`.
+TeamCity 9 will support storing the configuration in version control but if you're using an older version it's
+possible using this setup.
+
+The `logs`, `temp` and `work` directories are empty directories and are used by Tomcat.
+
+== Tomcat configuration
+
+The file `server.xml` in the `conf` directory is modified, the port the server listens on is changed to the
+default that TeamCity uses, 8111, the shutdown port is changed to 8115, and the redirectPort is changed to 8113.
+
+On the connector for port 8111, the acceptCount is set to 100, the redirectPort to 8113, the useBodyEncodingForURI is
+set to true, and maxThreads set to 200. On the connector for port 8113 (changed from 8443), the useBodyEncodingforURI
+is set to true.
+
+In the `conf/Catalina/localhost` directory a Tomcat context file is created, `teamcity.xml` that references the
+TeamCity war file.
+
+[source,xml]
+.teamcity.xml
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<Context docBase="${catalina.base}/TeamCity-8.0.6.war"/>
+----
+
+== Database
+
+The TeamCity documentation recommends not using the default HSQLDB database for a production setup. So I used MySQL,
+it can be installed using the Linux package manager. A database is created for TeamCity to use, using the following SQL.
+Here's a link to TeamCity's documentation on setting up on {uri-teamcity-mysql-config}[MySQL].
+
+[source,sql]
+----
+CREATE DATABASE $TEAMCITY_DB_NAME DEFAULT CHARACTER SET utf8;
+
+CREATE USER '$TEAMCITY_DB_USER'@'%' IDENTIFIED BY '$TEAMCITY_DB_PASS';
+GRANT ALL ON $TEAMCITY_DB_NAME.* TO '$TEAMCITY_DB_USER'@'%';
+
+DROP USER ''@'localhost';
+
+DROP USER ''@'teamcity.localdomain'; 
+----
+
+The above example uses environment variables to set the database name, user and password, an example setup script
+can be seen {uri-teamcity-database-setup}[here].
+
+Before TeamCity added support for using the JDBC driver placed in the `<TeamCity data directory>/lib/jdbc` it was
+possible to use another directory. Tomcat can be configured to add jars and classes to the classpath by modifying
+the `catalina.properties` file. The MySQL JDBC driver can be put into the directory `shared/lib` and the property
+`shared.loader` in `catalina.properties` can be changed to `shared/lib`. This avoids having to put the driver into the
+`webapps/ROOT/WEB-INF/lib` directory.
+
+== Properties
+
+The `server.sh` script used to start and stop TeamCity sets the following properties
+
+* java.net.preferIPv4Stack=true - Configures Java to prefer using IPv4 for network connections
+* java.rmi.server.hostname=$HOSTNAME - Allows remote JMX monitoring of the server, this must be the hostname for
+remote access and not localhost
+* teamcity.data.path=$TEAMCITY_HOME/data - Overrides the default TeamCity data directory
+* teamcity_logs=$TEAMCITY_HOME/logs - Overrides the default directory for TeamCity logs
+* log4j.configuration=file:$TEAMCITY_HOME/conf/teamcity-server-log4j.xml
+* teamcity.diskSpaceWatcher.threshold=250000 - Reports free space on the server's disk usage
+* teamcity.queue.mergeBuilds=true - Combines builds in the queue
+* modification.check.interval=360 - VCS check period
+
+The environment variable `TEAMCITY_HOME` is set to the `/opt/teamcity-server` directory.
+
+The last three properties are TeamCity specific, I don't remember where they came from, possibly from the support
+forums, but they are possibly no longer used.
+
+== Upgrading
+
+One of the main reasons for this setup was to make it easy to upgrade either Java, Tomcat or TeamCity.
+
+To upgrade Java just requires unpacking a new version in the `/opt` directory and updating the `JAVA_HOME` environment
+variable in the configuration file, `/etc/teamcity-server.conf`, that is used by the `server.sh` script.
+
+Similarly upgrading Tomcat requires unpacking into the `/opt` directory and updating the `CATALINA_HOME` environment
+variable in the file `/etc/teamcity-server.conf`. Using the `CATALINA_BASE` environment variable allows the Tomcat
+installation to be separate from the configuration files, `conf/catalina.properties` and `conf/server.xml`, used by
+the TeamCity webapp.
+
+To upgrade TeamCity, the server is shutdown and the database is backed up. The contents of the `logs`, `temp`,
+`webapps` and `work` directories can be moved or deleted, the `conf/Catalina/localhost/teamcity.xml` file is updated
+to reference the new TeamCity war file, and the server is started.
+
+== Summary
+
+The setup allows for easy upgrades of the various components, Java, Tomcat and TeamCity. All scripts and configuration
+files for Tomcat and TeamCity are under one directory and can be committed to version control. It uses a little
+less disk space than using the official installer, the default build agent and development package are omitted saving
+about 35MB. While this isn't much it does avoid the possibility of starting the default build agent which could then
+use about 500MB or more of disk space. I think it is recommended to avoid running a build agent on the same machine
+as the build server.
+
+An example of the setup described above can be found in the {uri-teamcity-server-setup}[setup-server.sh] script in
+the {uri-teamcity-vagrant}[teamcity-vagrant] project.
+It uses Vagrant to setup and start the TeamCity server and up to three Build Agents.
+
+This post doesn't discuss the setup of TeamCity Build Agents, there is a {uri-teamcity-agent-setup}[setup-agent.sh]
+script in the {uri-teamcity-vagrant}[teamcity-vagrant] project that downloads the buildAgent.zip file from the server
+and configures the agent. The installation of Build Agents is probably a separate post, I've since created Build Agents
+using {uri-packer}[Packer] and repackaged the buildAgent.zip as `RPM` and `deb` packages for Linux and a
+`pkg` file for Mac, but I think most people will be looking at using Docker for running Build Agents.
