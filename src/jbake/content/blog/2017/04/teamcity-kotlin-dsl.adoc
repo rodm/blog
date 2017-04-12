@@ -1,0 +1,439 @@
+= More on TeamCity\'s Kotlin DSL
+Rod MacKenzie
+2017-04-12
+:jbake-type: post
+:jbake-status: published
+:jbake-tags: teamcity, configuration, kotlin, dsl, gradle
+:idprefix:
+:uri-teamcity-settings-post: https://rodm.github.com/blog/2017/03/teamcity-versioned-settings.html
+:uri-teamcity-settings: https://github.com/rodm/teamcity-settings
+:uri-gradle-teamcity-plugin: https://github.com/rodm/gradle-teamcity-plugin[Gradle TeamCity plugin]
+:uri-gradle-teamcity-dsl-plugin: https://plugins.gradle.org/plugin/com.github.rodm.teamcity-dsl
+:uri-teamcity-docs: https://confluence.jetbrains.com/display/TCD10
+:uri-versioned-settings: {uri-teamcity-docs}/Storing+Project+Settings+in+Version+Control
+:uri-kotlin-dsl: {uri-teamcity-docs}/Kotlin+DSL
+:uri-upgrade-dsl: {uri-teamcity-docs}/Upgrading+DSL
+:uri-teamcity-settings-func: {uri-teamcity-settings}/blob/cd18ac6099ee357528cb4736bf72dd00d4569dad/.teamcity/GradleTeamCityPlugin/settings.kts
+:uri-teamcity-settings-base: {uri-teamcity-settings}/blob/d50402d4c1a7c717b34a9ff6adf3797a96409a1d/.teamcity/GradleTeamCityPlugin/settings.kts
+:uri-kotlin-configuration-scripts: https://blog.jetbrains.com/teamcity/2016/11/kotlin-configuration-scripts-an-introduction/
+:uri-travis: https://travis-ci.org/[Travis CI]
+:uri-appveyor: https://www.appveyor.com/[AppVeyor]
+
+== Introduction
+
+This post is a continuation of my experiments using TeamCity's Kotlin DSL that I started in my
+{uri-teamcity-settings-post}[previous post].
+
+In this post I cover adding multiple build configurations to a project and explore the different ways that can be
+achieved, from simple copy and paste to using base build types and build templates.
+Then I cover adding build features and build failure conditions to the build configurations.
+
+The last few sections cover triggering a build when the settings change, the Maven plugin and a Gradle plugin. The
+Maven plugin has a generate goal that provides some checking and reporting of any problems in the DSL.
+The Gradle plugin is a plugin that I've developed that provides similar functionality to the Maven plugin.
+
+=== Documentation
+
+When I started my experiments I hadn't read the documentation only the series of
+{uri-kotlin-configuration-scripts}[posts] on the TeamCity blog.
+
+The first page in the documentation {uri-versioned-settings}[Storing Project Settings in Version Control] covers
+the setup of using versioned settings and synchronizing the settings with a VCS. It also covers the implications
+of storing secure data such as passwords. The section on Displaying Changes covers triggering builds on settings
+changes that I discuss later.
+
+The {uri-kotlin-dsl}[Kotlin DSL] page covers the advantages of using the Kotlin DSL, how to download the current
+settings in a Kotlin format, working with the Kotlin DSL and setting up an IDE. It then covers making changes
+to the settings and applying those changes to a TeamCity server.
+
+The {uri-upgrade-dsl}[Upgrading DSL] page covers the changes that have been made to the DSL between the 10.0 version
+and the next release 2017.1. There are quite a number of changes, possibly a sign that the DSL is still being
+developed.
+
+The first two pages are useful for setting up a server to use versioned settings in the Kotlin format and
+setting up an IDE to make changes but there is no DSL reference so not something that will be referred to a lot.
+
+On the Kotlin DSL page there is a claim that it makes discovery of the available API options much simpler.
+It is easy to find methods and fields but it is not easy to map a field to the equivalent field in the UI.
+
+The documentation explains the purpose of the identifiers and the effect of changing a `uuid` on build configurations
+and projects but it doesn't explain why `extId` and `uuid` are required and can't be derived from the name.
+There is a section that recommends setting up unit tests for testing the DSL, but no example is provided, however
+there is an example in the last post of the blog series mentioned earlier.
+
+There is a recommendation to put the project settings in a separate VCS repository, I've used {uri-travis} and
+{uri-appveyor} and like the idea of keeping the settings with the code. There are good reasons to use a separate
+repository if passwords or other secure data maybe contained in the settings. One downside to this is having to tag
+and branch the repositories together if you ever need to rebuild an older version.
+
+== Kotlin Gradle plugin
+
+When I was writing the {uri-teamcity-settings-post}[previous post] I realised I was using the Java plugin, so I
+changed the build to use the Kotlin plugin.
+
+[source,groovy]
+----
+buildscript {
+    repositories {
+        mavenCentral()
+        maven {
+            url "https://plugins.gradle.org/m2/"
+        }
+    }
+    dependencies {
+        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.0.3'
+        classpath 'com.github.rodm:gradle-teamcity-plugin:0.11'
+    }
+}
+
+apply plugin: 'kotlin'
+----
+
+What this changed was that the `Project.kt` file would be compiled by the plugin so it provided some compile time
+checking that the code was valid but the `settings.kts` file was not compiled. This was a small
+improvement over the 'java' plugin that didn't compile either of the files.
+
+Using the Maven plugin does compile the `settings.kts` file but only if there is also a file with a `kt` extension
+in the package.
+There is a bit more to the <<maven_plugin,Maven plugin>> that I discuss later.
+
+== Multiple build configurations
+
+Before adding more build configurations I wanted to see if all the settings, project, build type and version control
+could be stored in the `settings.kts` file rather than spread out over many files. This does work but it means
+that neither the `java` plugin or the `kotlin` plugin will compile the file.
+
+To fully build and test the {uri-gradle-teamcity-plugin}, the project used to test the TeamCity Kotlin DSL, it is
+built and tested using Java 7 and Java 8, there are also 2 build configurations that run functional tests again using
+Java 7 and Java 8, then there is a build configuration to run the builds in the samples directory.
+Finally there is a code quality build configuration that runs the `sonarqube` task.
+The list of build configurations is as follows:-
+
+* Build - Java 7
+* Build - Java 8
+* Functional Test - Java 7
+* Functional Test - Java 8
+* Report - Code Quality
+* Samples Test - Java 7
+
+The differences between the build configurations can be achieved by setting the Gradle tasks and the Java home
+parameters, except for the Code Quality build, this requires an additional property `gradle.opts` that is used
+to provide the host URL for the SonarQube server.
+
+The next few sections discuss the different ways I've tried using the Kotlin DSL to create the above
+build configurations.
+
+=== Copy & Paste build types
+
+The first approach I took was just to copy and paste the code that creates a build type and modify it for each of the
+build configurations listed above. Each build type required a new value for the `name`, `extId` and `uuid` properties.
+For the different `uuid` values I copied the existing build's value and changed the last character.
+
+For builds running unit tests the `gradle.tasks` parameter was set to `clean build` for functional tests it was set
+to `clean functionalTest`, for the samples test it was set to `clean samplesTest` and for the code quality build it
+was set to `clean build sonarqube`.
+For builds using Java 7 the `java.home` parameter was set to `%java7.home%` and for Java 8 it was set to `%java8.home%`.
+
+Here's a link to the code
+{uri-teamcity-settings}/blob/d957834e4dc35ef061ce5f02b3d5c2a1bbb3510f/.teamcity/GradleTeamCityPlugin/settings.kts#L66-L95[settings.kts]
+with the repeated block highlighted.
+
+=== Replace duplicated code with functions
+
+The next approach was to refactor the common code into functions. I created two functions `createBuildType` and
+`configureBuildType`. The first function creates a build type with the `name`, `extId` and `uuid` properties set,
+the second function uses Kotlin's `apply` function to configure each built type with a VCS root, a Gradle build step,
+a VCS trigger and the Gradle tasks and Java home parameters. This reduced the `settings.kts` file by about 70 lines.
+
+The code can be seen at the following links, {uri-teamcity-settings-func}#L66-L68[build type],
+{uri-teamcity-settings-func}#L94-L100[createBuildType] and {uri-teamcity-settings-func}#L102-L130[configureBuildType]
+
+=== Base build types
+
+While writing the above code I noticed that the constructor for `BuiltType` takes an optional parameter, `base`, that
+is another `BuildType`. The comment for the constructor indicates that if `base` is not null the settings are copied
+from it to the new `BuildType`. So this provides another way of creating build configurations using shared code.
+
+The code for the base type can be seen here, {uri-teamcity-settings-base}#L73-L119[base build type], and the creation
+of a build type using it can be seen here, {uri-teamcity-settings-base}#L121-L125[build type].
+Additionally parts of the configuration can be overridden within the lambda, as seen here,
+{uri-teamcity-settings-base}#L148-L159[build type with overrides],
+the timeout is changed and the parameters have different values set.
+
+I've not tried it but it should be possible to construct a base build type based on another base build type, possibly
+reducing further the amount of code required to create multiple build configurations.
+
+The code for base build types seems to create more readable code, some of the lines in the previous example were
+too long.
+
+=== Build template
+
+Using a build template is similar to the base `BuildType` discussed in the previous section, a `Template` is created
+with the settings for a build configuration, then one or more `BuildType` s are created using the template. One
+noticeable difference in the code, when exporting a template from TeamCity, is that there are more `id` s, build steps,
+VCS triggers, and build features all have an `id`. This is to allow build configurations to override settings using
+the `id` to refer to the configuration in the template. I've found that the `id` s can be removed, without causing a
+problem, if they are not used to provide any additional configuration to a `BuildType`.
+
+The following link shows the
+{uri-teamcity-settings}/blob/template/.teamcity/GradleTeamCityPlugin/settings.kts#L74-L127[build template]
+and this link shows a
+{uri-teamcity-settings}/blob/template/.teamcity/GradleTeamCityPlugin/settings.kts#L129-L134[build type] using it
+
+There is little to choose between using base build types and build templates when looking at the Kotlin DSL but
+there is a difference with the XML files created by both. The base build type creates XML files that contain all the
+configuration for the build type where as the build type using a template contains essentially only the differences
+from the template, name, external id, uuid and any overrides.
+
+== Build configuration
+
+The next sections will cover some of the parts of a build configuration or build template, to add build features,
+failure conditions and a build trigger when the settings change.
+
+=== Build features
+
+The first feature I added to the build configuration was to use the Performance Monitor during a build, this feature
+is possibly one of the simplest to add, it has no configuration and the following code enables it.
+
+[source,java]
+----
+    feature {
+        id = "perfmon"
+        type = "perfmon"
+    }
+----
+
+The next feature I tried was more complex, a shared resource, it is configured at the project level and
+for each build configuration that uses it. In my example a 'Resource with quota' called 'BuildLimit' is created
+with a quota of '2', this will limit the number of concurrent builds using the resource to 2.
+
+The following code shows how a shared resource is configured for a project.
+
+[source,java]
+.Project level feature configuration
+----
+project {
+    features {
+        feature {
+            id = "PROJECT_EXT_2"
+            type = "JetBrains.SharedResources"
+            param("name", "BuildLimit")
+            param("type", "quoted")
+            param("quota", "2")
+        }
+    }
+}
+----
+
+The following code shows how a build configuration uses a shared resource
+
+[source,java]
+.Build type feature configuration
+----
+    features {
+        feature {
+            id = "BUILD_EXT_2"
+            type = "JetBrains.SharedResources"
+            param("locks-param", "BuildLimit readLock")
+        }
+    }
+----
+
+All the configuration and usage of a resource is done using strings, there are no hints on what the names or values
+could be, the only way is to configure a build and to export it. The XML Reporting plugin has the same problem
+there are many reports supported and each has different configuration parameters that can only be found by configuring
+a build using the UI and exporting it.
+
+While `id` s are not necessary they are useful to override a configuration in a template. For example to disable
+a feature the `enabled` property can be set to false with the `id` of the feature.
+
+[source,java]
+----
+    features {
+        feature {
+            id = "BUILD_EXT_2"
+            enabled = false
+        }
+    }
+----
+
+A more convenient method is available, the function `disableSettings` can be called with a variable list of ids
+of the features to be disabled.
+
+[source,java]
+----
+    features {
+        disableSettings("perfmon", "BUILD_EXT_2")
+    }
+----
+
+While not a build a feature I noticed that re-ordering build steps requires creating an ArrayList with the ids
+of the build steps in the order that they are to be executed. There is no equivalent method to `disableSettings`
+for the build steps order, so the API is inconsistent.
+
+[source,java]
+----
+    steps {
+        ....
+        stepsOrder = arrayListOf("RUNNER_2", "RUNNER_1", "RUNNER_3")
+    }
+----
+
+=== Failure conditions
+
+The only failure condition setting I typically make on a build configuration is to set a build timeout, and in this
+example I set it to 10 minutes.
+I've included all the properties that are available in the code below with their default values.
+These were easy to discover within my IDE.
+
+[source,java]
+----
+    failureConditions {
+        executionTimeoutMin = 10
+        nonZeroExitCode = true
+        testFailure = true
+        errorMessage = false
+        javaCrash = true
+    }
+----
+
+While the above settings are easy to discover and set, additional failure conditions based on metrics or build log
+messages are harder to configure using the API alone. Again setting up a build configuration with the failure
+condition and then exporting the project from TeamCity in Kotlin format is the best option.
+
+The example below shows a failure condition on a metric change, the enumerations for the various fields
+looks ugly, it would be cleaner if the values could be specified without the enclosing classes.
+It is also not easy to know which properties are required and which are optional.
+
+[source,java]
+----
+    failOnMetricChange {
+        metric = BuildFailureOnMetric.MetricType.ARTIFACT_SIZE
+        units = BuildFailureOnMetric.MetricUnit.DEFAULT_UNIT
+        comparison = BuildFailureOnMetric.MetricComparison.MORE
+        compareTo = build {
+            buildRule = lastPinned()
+        }
+    }
+----
+
+== Triggering a build when settings change
+
+On the Versioned Settings page there is a *Change Log* view that shows the changes made to the settings, it only
+shows changes made under the `.teamcity` directory. I wanted changes to the settings to trigger a build, it's
+possible a build failure is due to a configuration change.
+Following the {uri-versioned-settings}#StoringProjectSettingsinVersionControl-DisplayingChanges[documentation]
+I added the following to the VCS trigger.
+
+[source,java]
+----
+    triggers {
+         vcs {
+            triggerRules = "+:root=Settings_root_id;:*"
+         }
+     }
+----
+
+This didn't cause builds to trigger due to a settings change, so I changed the VCS root name to, `TeamcitySettings`
+this also didn't trigger any builds. After adding the VCS root to the build configuration and then reading the
+documentation about trigger rules I eventually found that the following worked.
+
+[source,java]
+----
+    triggers {
+        vcs {
+            triggerRules = """
+                +:root=TeamcitySettings;:**
+                +:root=GradleTeamcityPlugin:**
+            """.trimIndent()
+        }
+    }
+----
+
+The key was changing the file path wildcard pattern from '\*' to '**', also both the VCS roots for the settings and
+the project have to be included otherwise only changes to one VCS root will trigger a build.
+
+I mentioned above that I added the settings VCS root to the build configuration, I had to revert that change,
+the settings VCS root resulted in the project code being checked out then removed for the settings checkout.
+So the build configuration has only the VCS root for the project and not the settings VCS root, this works despite
+the reference in the trigger rules.
+Although this causes TeamCity to show a warning in the UI about an un-attached VCS root.
+
+image::/blog/2017/04/unattached-vcs-root.png[Unattached VCS root, align="center"]
+
+== Maven Plugin
+
+When I initially converted the Maven POM file to a Gradle equivalent I missed the Maven plugin,
+`teamcity-configs-maven-plugin`.
+The plugin only gets a brief mention in the
+{uri-kotlin-dsl}#KotlinDSL-ChangePasswordsafterSettingsGeneration[documentation]
+about using it to scramble passwords for updating an existing configuration after a password change.
+
+The plugin has two goals `generate` and `scramble`. The `generate` goal is interesting, executing this goal compiles
+the Kotlin DSL settings and outputs the XML files used by TeamCity into the `target/generated-configs` directory. If
+the DSL files fail to compile or contain an incorrect setting the XML files are not produced and a file
+`dsl_exception.xml` is created listing the problems.
+
+The example below shows what happens if a build type is created without a `uuid`.
+
+[source,xml]
+.dsl_exception.xml
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<exception message="DSL script execution failure">
+  <details>
+    <info>jetbrains.buildServer.configs.dsl.kotlin.KotlinRunner.run [106]</info>
+    <info>jetbrains.buildServer.configs.dsl.kotlin.KotlinRunner.run [85]</info>
+    <info>jetbrains.buildServer.configs.dsl.DslGeneratorProcess.generateProjects [79]</info>
+    <info>jetbrains.buildServer.configs.dsl.DslGeneratorProcess.main [41]</info>
+  </details>
+  <errors>
+    <error type="validation" source="" message="Missing uuid in buildType 'GradleTeamcityPlugin_BuildJava8'" project="GradleTeamCityPlugin" />
+  </errors>
+</exception>
+----
+
+If the invalid configuration change is committed, TeamCity will show the problem on the project page as shown below.
+
+image::/blog/2017/04/missing-uuid.png[Missing uuid, align="center"]
+
+Running a build with an invalid configuration change will use the previous valid settings but will show that the
+build has a problem.
+
+image::/blog/2017/04/build-problems.png[Build problems, align="center"]
+
+The plugin provides a useful tool to check the settings before committing but there are many cases where it doesn't
+report a problem. It is possible to use the same `uuid` for build configurations, there are no checks for build feature
+parameters and it doesn't catch the import problem I had in the previous post.
+
+== Gradle DSL Plugin
+
+The Maven plugin, `teamcity-configs-maven-plugin`, appears to be a simple adapter that calls into the DSL generator
+code that is used by TeamCity.
+I decided to try creating a Gradle plugin that does a similar job and the result can be found in this project,
+{uri-gradle-teamcity-dsl-plugin}[gradle-teamcity-dsl-plugin].
+The plugin provides a task `generateConfiguration` that compiles the settings DSL and outputs the XML files
+into the `build/generated-configs` directory and sets up the `.teamcity` directory as a source set.
+It is still a work-in-progress but is quite usable now as an alternative to the Maven plugin.
+
+== Summary
+
+The documentation provides useful setup information but lacks a good DSL reference like the Gradle DSL reference.
+
+Using the DSL to create projects and build configurations is very flexible as shown by the different approaches
+I took to create multiple build configurations. I'm sure one or more of them could be used to setup multiple projects
+and possibly hundreds of build configurations.
+
+Due to the lack of a good DSL reference the development cycle for creating and editing settings will require using
+the TeamCity UI to configure a project or build configuration and to then export it in Kotlin format.
+
+I imagine that creating build configurations targeting different platforms, build tools or version control systems
+will have some of the same problems I've encountered above and possibly others.
+
+A comment in my previous post describes how the code completion menu offers too many options, this was due to
+the approach I took of moving all the code into the `settings.kts` file. I'm guessing most of the DSL API is in scope
+making it more difficult to choose a valid, in scope, method or field. I discovered this after introducing the
+functions to create a build type and configure it, within the functions there was less API options.
+
+Hopefully this post and the {uri-teamcity-settings-post}[previous post] have provided some ideas on how to use
+TeamCity's Kotlin DSL.
