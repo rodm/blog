@@ -1,0 +1,5 @@
+title=Tags Index
+date=2017-04-19
+type=tagindex
+status=published
+~~~~~~
