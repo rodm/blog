@@ -9,13 +9,13 @@ buildscript {
 
     dependencies {
         classpath 'me.champeau.gradle:jbake-gradle-plugin:0.3.0-SNAPSHOT'
-        classpath 'org.ajoberstar:gradle-git:1.6.0'
+        classpath 'org.ajoberstar:gradle-git-publish:0.2.1'
     }
 }
 
 apply plugin: 'base'
 apply plugin: 'me.champeau.jbake'
-apply plugin: 'org.ajoberstar.github-pages'
+apply plugin: 'org.ajoberstar.git-publish'
 
 ext {
     message = findProperty('message') ?: 'Publish of Github pages from Gradle.'
@@ -30,11 +30,11 @@ jbake {
     clearCache = true
 }
 
-githubPages {
+gitPublish {
     repoUri = 'git@github.com:rodm/rodm.github.io.git'
-    targetBranch = 'master'
+    branch = 'master'
     commitMessage = message
-    pages {
+    contents {
         from (file('build/jbake')) {
             exclude '**/*-draft.html'
             into '.'
