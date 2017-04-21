@@ -1,21 +1,8 @@
 
-buildscript {
-    repositories {
-        mavenLocal()
-        maven {
-            url "https://plugins.gradle.org/m2/"
-        }
-    }
-
-    dependencies {
-        classpath 'org.jbake:jbake-gradle-plugin:1.0.0'
-        classpath 'org.ajoberstar:gradle-git-publish:0.2.1'
-    }
+plugins {
+    id 'org.jbake.site' version '1.0.0'
+    id 'org.ajoberstar.git-publish' version '0.2.1'
 }
-
-apply plugin: 'base'
-apply plugin: 'org.jbake.site'
-apply plugin: 'org.ajoberstar.git-publish'
 
 ext {
     message = findProperty('message') ?: 'Publish of Github pages from Gradle.'
