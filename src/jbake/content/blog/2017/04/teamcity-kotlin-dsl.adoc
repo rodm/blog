@@ -5,7 +5,7 @@ Rod MacKenzie
 :jbake-status: published
 :jbake-tags: teamcity, configuration, kotlin, dsl, gradle
 :idprefix:
-:uri-teamcity-settings-post: https://rodm.github.com/blog/2017/03/teamcity-versioned-settings.html
+:uri-teamcity-settings-post: https://rodm.github.io/blog/2017/03/teamcity-versioned-settings.html
 :uri-teamcity-settings: https://github.com/rodm/teamcity-settings
 :uri-gradle-teamcity-plugin: https://github.com/rodm/gradle-teamcity-plugin[Gradle TeamCity plugin]
 :uri-gradle-teamcity-dsl-plugin: https://plugins.gradle.org/plugin/com.github.rodm.teamcity-dsl
